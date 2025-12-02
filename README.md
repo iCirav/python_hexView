@@ -1,5 +1,7 @@
 ![Screenshot of the help interface](/assets/images/cli.png)
 
+![Screenshot of output](/assets/images/output.png)
+
 Default Colors:
 ```
 python hexviewer.py -f example.bin

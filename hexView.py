@@ -1,73 +1,105 @@
-import sys, os
+import argparse
+import os
+import re
 
-def cls():
-    #Clears the terminal screen.
-    if sys.platform.startswith('win'):
-        os.system('cls')  # For Windows
-    else:
-        os.system('clear') # For Linux and macOS
-        
-def hex_view(file):
-    with open(file, "rb") as file_obj:
-        #Chunk size should be 1, to read 1 byte at a time
-        chunk_size = 1
+# ANSI color codes
+RESET = "\033[0m"
+RED = "\033[31m"      # Non-printable bytes
+YELLOW = "\033[33m"   # Repeating bytes
+CYAN = "\033[36m"     # Null bytes
+GREEN = "\033[32m"    # Search matches
 
-        #Do you want 8bit or 16 bit?  16 is default
-        bytes_per_line = 16
+def hex_view(file_path, bytes_per_line=16, start=0, length=None, search=None, search_str=None):
+    """CLI hex viewer with color highlighting and search functionality."""
+    try:
+        with open(file_path, "rb") as f:
+            f.seek(start)
+            line_number = start // bytes_per_line
+            bytes_read = 0
 
-        #Variable Initializaition
-        hex_line = ""
-        ascii_line = ""
-        line_number = 1
-    
-        while True:
-            #Use a for loop to iterate through the file in either 8 or 16
-            # bit mode.
+            # Convert search hex string to bytes if needed
+            if search:
+                search_bytes = bytes.fromhex(search)
+            elif search_str:
+                search_bytes = search_str.encode('latin-1')
+            else:
+                search_bytes = None
 
-            for i in range(0,bytes_per_line):
-                #Read out the next byte
-                #Then build the variable for the hex line to be printed
-                chunk = file_obj.read(chunk_size)
-                hex_byte = chunk.hex()
-                hex_line = hex_line + hex_byte + " "
-            
-                #Decode the byte for the ascii line to be printed
-                decoded_byte = chunk.decode('latin-1')
-                ascii_line = ascii_line + decoded_byte
+            prev_chunk = None
 
-            # Break out of the while loop if we read null data
-            if not chunk:
-                break
+            while True:
+                if length is not None:
+                    to_read = min(bytes_per_line, length - bytes_read)
+                    if to_read <= 0:
+                        break
+                    chunk = f.read(to_read)
+                else:
+                    chunk = f.read(bytes_per_line)
 
-            #Print the hex and ascii
-            #Example:
-            #
-            # 8-Bit Mode
-            #41 41 41 41 41 41 41 41    AAAAAAAA
-            #
-            # 16-Bit Mode
-            #41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41   AAAAAAAAAAAAAAAA
+                if not chunk:
+                    break
 
-            print(f"{line_number}:\t {hex_line}\t{ascii_line}")
-            line_number = line_number + 1
-            hex_line = ""
-            ascii_line = ""
+                # Hex representation with highlights
+                hex_parts = []
+                for i, b in enumerate(chunk):
+                    hex_str = f"{b:02X}"
+                    # Null byte highlight
+                    if b == 0x00:
+                        hex_str = f"{CYAN}{hex_str}{RESET}"
+                    # Repeat byte highlight
+                    elif prev_chunk and i < len(prev_chunk) and b == prev_chunk[i]:
+                        hex_str = f"{YELLOW}{hex_str}{RESET}"
+                    hex_parts.append(hex_str)
+                hex_line = ' '.join(hex_parts)
 
-# Check to see if a file was dropped onto the program
-if sys.argv[1:]:
-    file_path = sys.argv[1]                 # Get file path from arguments
-    file_name = os.path.basename(file_path) # Get file name from file path
+                # ASCII representation
+                ascii_parts = []
+                for i, b in enumerate(chunk):
+                    char = chr(b) if 32 <= b <= 126 else f"{RED}.{RESET}"
+                    # Highlight search matches
+                    if search_bytes:
+                        for j in range(len(search_bytes)):
+                            if i + j < len(chunk) and chunk[i:i+len(search_bytes)] == search_bytes:
+                                char = f"{GREEN}{char}{RESET}"
+                    ascii_parts.append(char)
+                ascii_line = ''.join(ascii_parts)
 
-    print(f"Opening {file_name} from {file_path}\n\n")
+                # Print line offset, hex, and ASCII
+                print(f"{line_number*bytes_per_line:08X}  {hex_line:<{bytes_per_line*3}}  {ascii_line}")
 
-    cls
-    hex_view(file_name)
-    user_data = input("\nPress enter key to terminate program.")
-    
+                prev_chunk = chunk
+                line_number += 1
+                bytes_read += len(chunk)
 
-# This is called when there is no file provided to analyze.
-else:
-    print("No file specified.")
-    print("Drag and drop file onto this program.")
-    user_data = input("\nPress enter key to terminate program.")
-    sys.exit()
+    except FileNotFoundError:
+        print(f"File not found: {file_path}")
+    except Exception as e:
+        print(f"Error reading file: {e}")
+
+def main():
+    parser = argparse.ArgumentParser(description="Enhanced CLI Hex Viewer")
+    parser.add_argument("-f", "--file", required=True, help="Path to the file to display")
+    parser.add_argument("-b", "--bytes-per-line", type=int, default=16, help="Number of bytes per line")
+    parser.add_argument("--start", type=int, default=0, help="Start byte offset")
+    parser.add_argument("--length", type=int, help="Number of bytes to display")
+    parser.add_argument("--search", help="Hex byte pattern to highlight, e.g., 'DEADBEEF'")
+    parser.add_argument("--search-str", help="ASCII string to highlight")
+
+    args = parser.parse_args()
+    file_path = args.file
+
+    if not os.path.isfile(file_path):
+        print(f"File not found: {file_path}")
+        return
+
+    hex_view(
+        file_path,
+        bytes_per_line=args.bytes_per_line,
+        start=args.start,
+        length=args.length,
+        search=args.search,
+        search_str=args.search_str
+    )
+
+if __name__ == "__main__":
+    main()
